@@ -142,9 +142,11 @@ static void sols_channel_new(struct sr_dev_inst *sdi, int num_chan)
 	struct dev_context *devc = sdi->priv;
 	int i;
 
-	for (i = 0; i < num_chan; i++)
-		sr_channel_new(sdi, i, SR_CHANNEL_LOGIC, TRUE,
-				ols_channel_names[i]);
+	for (i = 0; i < num_chan; i++) {
+		char channel_name[10];
+		sprintf(channel_name, "%d", i);
+		sr_channel_new(sdi, i, SR_CHANNEL_LOGIC, TRUE, channel_name);
+    }
 
 	devc->max_channels = num_chan;
 }
