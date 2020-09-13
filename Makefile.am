@@ -590,6 +590,12 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/siglent-sds/protocol.c \
 	src/hardware/siglent-sds/api.c
 endif
+if HW_SOLA
+src_libdrivers_la_SOURCES += \
+	src/hardware/sola/protocol.h \
+	src/hardware/sola/protocol.c \
+	src/hardware/sola/api.c
+endif
 if HW_SYSCLK_LWLA
 src_libdrivers_la_SOURCES += \
 	src/hardware/sysclk-lwla/lwla.h \
