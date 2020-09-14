@@ -35,18 +35,15 @@ SR_PRIV int sols_send_shortcommand(struct sr_serial_dev_inst *serial, uint8_t co
 	return SR_OK;
 }
 
-SR_PRIV int sols_send_longcommand(struct sr_serial_dev_inst *serial, uint8_t command, uint8_t *data)
+SR_PRIV int sols_send_longcommand(struct sr_serial_dev_inst *serial, uint8_t command, uint8_t *data, uint8_t dataSize)
 {
-	char buf[5];
+	char buf[dataSize+1];
 
-	sr_dbg("Sending cmd 0x%.2x data 0x%.2x%.2x%.2x%.2x.", command,
-			data[0], data[1], data[2], data[3]);
+	sr_dbg("Sending cmd 0x%.2x data 0x%.2x%.2x%.2x%.2x%.2x%.2x%.2x%.2x.", command,
+			data[4], data[5], data[6], data[7], data[0], data[1], data[2], data[3]);
 	buf[0] = command;
-	buf[1] = data[0];
-	buf[2] = data[1];
-	buf[3] = data[2];
-	buf[4] = data[3];
-	if (serial_write_blocking(serial, buf, 5, serial_timeout(serial, 1)) != 5)
+    memcpy(&buf[1], data, dataSize);
+	if (serial_write_blocking(serial, buf, dataSize+1, serial_timeout(serial, 1)) != dataSize+1)
 		return SR_ERR;
 
 	if (serial_drain(serial) != SR_OK)
@@ -96,7 +93,7 @@ SR_PRIV int sols_convert_trigger(const struct sr_dev_inst *sdi)
 	devc = sdi->priv;
 
 	devc->num_stages = 0;
-	for (i = 0; i < NUM_TRIGGER_STAGES; i++) {
+	for (i = 0; i < 16; i++) {
 		devc->trigger_mask[i] = 0;
 		devc->trigger_value[i] = 0;
 	}
@@ -117,10 +114,12 @@ SR_PRIV int sols_convert_trigger(const struct sr_dev_inst *sdi)
 			match = m->data;
 			if (!match->channel->enabled)
 				/* Ignore disabled channels with a trigger. */
-				continue;
-			devc->trigger_mask[stage->stage] |= 1 << match->channel->index;
+ 				continue;
+            uint8_t triggerWord = match->channel->index / 32;
+            sr_dbg("trig on channel %i to trigword %i", match->channel->index, triggerWord);
+			devc->trigger_mask[triggerWord] |= 1 << (match->channel->index - (32 * triggerWord));
 			if (match->match == SR_TRIGGER_ONE)
-				devc->trigger_value[stage->stage] |= 1 << match->channel->index;
+				devc->trigger_value[triggerWord] |= 1 << (match->channel->index - (32 * triggerWord));
 		}
 	}
 
@@ -305,7 +304,8 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 	struct sr_serial_dev_inst *serial;
 	struct sr_datafeed_packet packet;
 	struct sr_datafeed_logic logic;
-	uint32_t sample;
+	
+    int bytesPerSample;
 	int num_ols_changrp, offset, j;
 	unsigned int i;
 	unsigned char byte;
@@ -315,6 +315,8 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 	sdi = cb_data;
 	serial = sdi->conn;
 	devc = sdi->priv;
+    uint32_t sample[devc->max_channels/32];
+    bytesPerSample = (devc->max_channels / 8);
 
 	if (devc->num_transfers == 0 && revents == 0) {
 		/* Ignore timeouts as long as we haven't received anything */
@@ -322,13 +324,13 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 	}
 
 	if (devc->num_transfers++ == 0) {
-		devc->raw_sample_buf = g_try_malloc(devc->limit_samples * 4);
+		devc->raw_sample_buf = g_try_malloc(devc->limit_samples * bytesPerSample);
 		if (!devc->raw_sample_buf) {
 			sr_err("Sample buffer malloc failed.");
 			return FALSE;
 		}
 		/* fill with 1010... for debugging */
-		memset(devc->raw_sample_buf, 0x82, devc->limit_samples * 4);
+		memset(devc->raw_sample_buf, 0x82, devc->limit_samples * bytesPerSample);
 	}
 
 	num_ols_changrp = 0;
@@ -337,6 +339,9 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 			num_ols_changrp++;
 		}
 	}
+	
+	//test
+	num_ols_changrp = 8;
 
 	if (revents == G_IO_IN && devc->num_samples < devc->limit_samples) {
 		if (serial_read_nonblocking(serial, &byte, 1) != 1)
@@ -356,9 +361,14 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 			 * Got a full sample. Convert from the OLS's little-endian
 			 * sample to the local format.
 			 */
-			sample = devc->sample[0] | (devc->sample[1] << 8) \
-					| (devc->sample[2] << 16) | (devc->sample[3] << 24);
-			sr_dbg("Received sample 0x%.*x.", devc->num_bytes * 2, sample);
+            for(int n = 0; n < (devc->max_channels/32); ++n) 
+            {
+              sample[n] = devc->sample[0+(n*4)] | (devc->sample[1+(n*4)] << 8) \
+					| (devc->sample[2+(n*4)] << 16) | (devc->sample[3+(n*4)] << 24) ;
+              sr_dbg("Received sample 0x%.*x.", 4 * 2, sample[n]);
+            }
+			
+			
 			if (devc->capture_flags & CAPTURE_FLAG_RLE) {
 				/*
 				 * In RLE mode the high bit of the sample is the
@@ -367,8 +377,8 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 				 */
 				if (devc->sample[devc->num_bytes - 1] & 0x80) {
 					/* Clear the high bit. */
-					sample &= ~(0x80 << (devc->num_bytes - 1) * 8);
-					devc->rle_count = sample;
+					//sample &= ~(0x80 << (devc->num_bytes - 1) * 8);
+					//devc->rle_count = sample;
 					devc->cnt_samples_rle += devc->rle_count;
 					sr_dbg("RLE count: %u.", devc->rle_count);
 					devc->num_bytes = 0;
@@ -382,7 +392,7 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 				devc->num_samples = devc->limit_samples;
 			}
 
-			if (num_ols_changrp < 4) {
+			if (num_ols_changrp < bytesPerSample) {
 				/*
 				 * Some channel groups may have been turned
 				 * off, to speed up transfer between the
@@ -405,7 +415,7 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 					}
 				}
 				memcpy(devc->sample, devc->tmp_sample, 4);
-				sr_spew("Expanded sample: 0x%.8x.", sample);
+				//sr_spew("Expanded sample: 0x%.8x.", sample);
 			}
 
 			/*
@@ -413,12 +423,12 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 			 * store it in reverse order here, so we can dump
 			 * this on the session bus later.
 			 */
-			offset = (devc->limit_samples - devc->num_samples) * 4;
+			offset = (devc->limit_samples - devc->num_samples) * bytesPerSample;
 			for (i = 0; i <= devc->rle_count; i++) {
-				memcpy(devc->raw_sample_buf + offset + (i * 4),
-				       devc->sample, 4);
+				memcpy(devc->raw_sample_buf + offset + (i * bytesPerSample),
+				       devc->sample, bytesPerSample);
 			}
-			memset(devc->sample, 0, 4);
+			memset(devc->sample, 0, bytesPerSample);
 			devc->num_bytes = 0;
 			devc->rle_count = 0;
 		}
@@ -440,10 +450,10 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 				/* There are pre-trigger samples, send those first. */
 				packet.type = SR_DF_LOGIC;
 				packet.payload = &logic;
-				logic.length = devc->trigger_at_smpl * 4;
-				logic.unitsize = 4;
+				logic.length = devc->trigger_at_smpl * bytesPerSample;
+				logic.unitsize = bytesPerSample;
 				logic.data = devc->raw_sample_buf +
-					(devc->limit_samples - devc->num_samples) * 4;
+					(devc->limit_samples - devc->num_samples) * bytesPerSample;
 				sr_session_send(sdi, &packet);
 			}
 
@@ -456,10 +466,10 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 			? 0 : devc->trigger_at_smpl;
 		packet.type = SR_DF_LOGIC;
 		packet.payload = &logic;
-		logic.length = (devc->num_samples - num_pre_trigger_samples) * 4;
-		logic.unitsize = 4;
+		logic.length = (devc->num_samples - num_pre_trigger_samples) * bytesPerSample;
+		logic.unitsize = bytesPerSample;
 		logic.data = devc->raw_sample_buf + (num_pre_trigger_samples +
-			devc->limit_samples - devc->num_samples) * 4;
+			devc->limit_samples - devc->num_samples) * bytesPerSample;
 		sr_session_send(sdi, &packet);
 
 		g_free(devc->raw_sample_buf);

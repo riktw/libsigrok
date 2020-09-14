@@ -278,34 +278,51 @@ static int set_basic_trigger(const struct sr_dev_inst *sdi, int stage)
 {
 	struct dev_context *devc;
 	struct sr_serial_dev_inst *serial;
-	uint8_t cmd, arg[4];
+	uint8_t cmd;
+    int n;
 
 	devc = sdi->priv;
 	serial = sdi->conn;
+    
+    uint8_t bytesToSend = devc->max_channels/8;
+    uint8_t triggersToSend = devc->max_channels/32;
+    
+    uint8_t arg[bytesToSend];
+    memset(arg, 0, bytesToSend);
 
 	cmd = CMD_SET_BASIC_TRIGGER_MASK0 + stage * 4;
-	arg[0] = devc->trigger_mask[stage] & 0xff;
-	arg[1] = (devc->trigger_mask[stage] >> 8) & 0xff;
-	arg[2] = (devc->trigger_mask[stage] >> 16) & 0xff;
-	arg[3] = (devc->trigger_mask[stage] >> 24) & 0xff;
-	if (sols_send_longcommand(serial, cmd, arg) != SR_OK)
+    
+    for(n = 0; n < triggersToSend; ++n)
+    {
+      sr_dbg("n is %i, mask is %x", (triggersToSend-1)-n, devc->trigger_mask[(triggersToSend-1)-n]);
+      arg[(n*4)+0] = devc->trigger_mask[(triggersToSend-1)-n] & 0xff;
+      arg[(n*4)+1] = (devc->trigger_mask[(triggersToSend-1)-n] >> 8) & 0xff;
+      arg[(n*4)+2] = (devc->trigger_mask[(triggersToSend-1)-n] >> 16) & 0xff;
+      arg[(n*4)+3] = (devc->trigger_mask[(triggersToSend-1)-n] >> 24) & 0xff;
+    }
+	if (sols_send_longcommand(serial, cmd, arg, bytesToSend) != SR_OK)
 		return SR_ERR;
 
 	cmd = CMD_SET_BASIC_TRIGGER_VALUE0 + stage * 4;
-	arg[0] = devc->trigger_value[stage] & 0xff;
-	arg[1] = (devc->trigger_value[stage] >> 8) & 0xff;
-	arg[2] = (devc->trigger_value[stage] >> 16) & 0xff;
-	arg[3] = (devc->trigger_value[stage] >> 24) & 0xff;
-	if (sols_send_longcommand(serial, cmd, arg) != SR_OK)
+    
+    for(n = 0; n < triggersToSend; ++n)
+    {
+      sr_dbg("n is %i, value is %x", (triggersToSend-1)-n, devc->trigger_value[(triggersToSend-1)-n]);
+      arg[(n*4)+0] = devc->trigger_value[(triggersToSend-1)-n] & 0xff;
+      arg[(n*4)+1] = (devc->trigger_value[(triggersToSend-1)-n] >> 8) & 0xff;
+      arg[(n*4)+2] = (devc->trigger_value[(triggersToSend-1)-n] >> 16) & 0xff;
+      arg[(n*4)+3] = (devc->trigger_value[(triggersToSend-1)-n] >> 24) & 0xff;
+    }
+	if (sols_send_longcommand(serial, cmd, arg, bytesToSend) != SR_OK)
 		return SR_ERR;
 
 	cmd = CMD_SET_BASIC_TRIGGER_CONFIG0 + stage * 4;
-	arg[0] = arg[1] = arg[3] = 0x00;
-	arg[2] = stage;
+
+	arg[bytesToSend-2] = stage;
 	if (stage == devc->num_stages)
 		/* Last stage, fire when this one matches. */
-		arg[3] |= TRIGGER_START;
-	if (sols_send_longcommand(serial, cmd, arg) != SR_OK)
+		arg[bytesToSend-1] |= TRIGGER_START;
+	if (sols_send_longcommand(serial, cmd, arg, bytesToSend) != SR_OK)
 		return SR_ERR;
 
 	return SR_OK;
@@ -316,15 +333,20 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	struct dev_context *devc;
 	struct sr_serial_dev_inst *serial;
 	uint32_t samplecount, readcount, delaycount;
-	uint8_t sols_changrp_mask, arg[4];
+	uint8_t sols_changrp_mask;
 	int num_sols_changrp;
 	int ret, i;
 
 	devc = sdi->priv;
 	serial = sdi->conn;
 
+    uint8_t bytesToSend = devc->max_channels/8;
+    
+    uint8_t arg[bytesToSend];
+    memset(arg, 0, bytesToSend);
+    
 	sols_channel_mask(sdi);
-
+    
 	num_sols_changrp = 0;
 	sols_changrp_mask = 0;
 	for (i = 0; i < 4; i++) {
@@ -357,11 +379,9 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 
 		delaycount = readcount * (1 - devc->capture_ratio / 100.0);
 		devc->trigger_at_smpl = (readcount - delaycount) * 4 - devc->num_stages;
-		for (i = 0; i <= devc->num_stages; i++) {
-			sr_dbg("Setting sols stage %d trigger.", i);
-			if ((ret = set_basic_trigger(sdi, i)) != SR_OK)
-				return ret;
-		}
+        sr_dbg("Setting sols trigger.");
+        if ((ret = set_basic_trigger(sdi, 0)) != SR_OK)
+            return ret;
 	} else {
 		/* No triggers configured, force trigger on first stage. */
 		sr_dbg("Forcing trigger at stage 0.");
@@ -373,11 +393,11 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	/* Samplerate. */
 	sr_dbg("Setting samplerate to %" PRIu64 "Hz (divider %u)",
 			devc->cur_samplerate, devc->cur_samplerate_divider);
-	arg[0] = devc->cur_samplerate_divider & 0xff;
-	arg[1] = (devc->cur_samplerate_divider & 0xff00) >> 8;
-	arg[2] = (devc->cur_samplerate_divider & 0xff0000) >> 16;
-	arg[3] = 0x00;
-	if (sols_send_longcommand(serial, CMD_SET_DIVIDER, arg) != SR_OK)
+	arg[bytesToSend - 4] = devc->cur_samplerate_divider & 0xff;
+	arg[bytesToSend - 3] = (devc->cur_samplerate_divider & 0xff00) >> 8;
+	arg[bytesToSend - 2] = (devc->cur_samplerate_divider & 0xff0000) >> 16;
+	arg[bytesToSend - 1] = 0x00;
+	if (sols_send_longcommand(serial, CMD_SET_DIVIDER, arg, bytesToSend) != SR_OK)
 		return SR_ERR;
 
 	/* Send sample limit and pre/post-trigger capture ratio. */
@@ -385,24 +405,24 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 			(readcount - 1) * 4, (delaycount - 1) * 4);
 
 	if (devc->max_samples > 256 * 1024) {
-		arg[0] = ((readcount - 1) & 0xff);
-		arg[1] = ((readcount - 1) & 0xff00) >> 8;
-		arg[2] = ((readcount - 1) & 0xff0000) >> 16;
-		arg[3] = ((readcount - 1) & 0xff000000) >> 24;
-		if (sols_send_longcommand(serial, CMD_CAPTURE_READCOUNT, arg) != SR_OK)
+		arg[bytesToSend - 4] = ((readcount - 1) & 0xff);
+		arg[bytesToSend - 3] = ((readcount - 1) & 0xff00) >> 8;
+		arg[bytesToSend - 2] = ((readcount - 1) & 0xff0000) >> 16;
+		arg[bytesToSend - 1] = ((readcount - 1) & 0xff000000) >> 24;
+		if (sols_send_longcommand(serial, CMD_CAPTURE_READCOUNT, arg, bytesToSend) != SR_OK)
 			return SR_ERR;
-		arg[0] = ((delaycount - 1) & 0xff);
-		arg[1] = ((delaycount - 1) & 0xff00) >> 8;
-		arg[2] = ((delaycount - 1) & 0xff0000) >> 16;
-		arg[3] = ((delaycount - 1) & 0xff000000) >> 24;
-		if (sols_send_longcommand(serial, CMD_CAPTURE_DELAYCOUNT, arg) != SR_OK)
+		arg[bytesToSend - 4] = ((delaycount - 1) & 0xff);
+		arg[bytesToSend - 3] = ((delaycount - 1) & 0xff00) >> 8;
+		arg[bytesToSend - 2] = ((delaycount - 1) & 0xff0000) >> 16;
+		arg[bytesToSend - 1] = ((delaycount - 1) & 0xff000000) >> 24;
+		if (sols_send_longcommand(serial, CMD_CAPTURE_DELAYCOUNT, arg, bytesToSend) != SR_OK)
 			return SR_ERR;
 	} else {
-		arg[0] = ((readcount - 1) & 0xff);
-		arg[1] = ((readcount - 1) & 0xff00) >> 8;
-		arg[2] = ((delaycount - 1) & 0xff);
-		arg[3] = ((delaycount - 1) & 0xff00) >> 8;
-		if (sols_send_longcommand(serial, CMD_CAPTURE_SIZE, arg) != SR_OK)
+		arg[bytesToSend - 4] = ((readcount - 1) & 0xff);
+		arg[bytesToSend - 3] = ((readcount - 1) & 0xff00) >> 8;
+		arg[bytesToSend - 2] = ((delaycount - 1) & 0xff);
+		arg[bytesToSend - 1] = ((delaycount - 1) & 0xff00) >> 8;
+		if (sols_send_longcommand(serial, CMD_CAPTURE_SIZE, arg, bytesToSend) != SR_OK)
 			return SR_ERR;
 	}
 
@@ -417,10 +437,10 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 
 	/* RLE mode is always zero, for now. */
 
-	arg[0] = devc->capture_flags & 0xff;
-	arg[1] = devc->capture_flags >> 8;
-	arg[2] = arg[3] = 0x00;
-	if (sols_send_longcommand(serial, CMD_SET_FLAGS, arg) != SR_OK)
+	arg[bytesToSend - 4] = devc->capture_flags & 0xff;
+	arg[bytesToSend - 3] = devc->capture_flags >> 8;
+
+	if (sols_send_longcommand(serial, CMD_SET_FLAGS, arg, bytesToSend) != SR_OK)
 		return SR_ERR;
 
 	/* Start acquisition on the device. */

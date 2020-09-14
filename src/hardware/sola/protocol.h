@@ -90,8 +90,8 @@ struct dev_context {
 	uint64_t capture_ratio;
 	int trigger_at_smpl;
 	uint32_t channel_mask;
-	uint32_t trigger_mask[NUM_TRIGGER_STAGES];
-	uint32_t trigger_value[NUM_TRIGGER_STAGES];
+	uint32_t trigger_mask[16];     //32 pits per mask, 16, max of 512 channels seems decent.
+	uint32_t trigger_value[16];
 	int num_stages;
 	uint16_t capture_flags;
 
@@ -103,15 +103,15 @@ struct dev_context {
 	int cnt_samples_rle;
 
 	unsigned int rle_count;
-	unsigned char sample[4];
-	unsigned char tmp_sample[4];
+	unsigned char sample[16];
+	unsigned char tmp_sample[16];
 	unsigned char *raw_sample_buf;
 };
 
 SR_PRIV extern const char *ols_channel_names[];
 
 SR_PRIV int sols_send_shortcommand(struct sr_serial_dev_inst *serial, uint8_t command);
-SR_PRIV int sols_send_longcommand(struct sr_serial_dev_inst *serial, uint8_t command, uint8_t *data);
+SR_PRIV int sols_send_longcommand(struct sr_serial_dev_inst *serial, uint8_t command, uint8_t *data, uint8_t dataSize);
 SR_PRIV int sols_send_reset(struct sr_serial_dev_inst *serial);
 SR_PRIV void sols_channel_mask(const struct sr_dev_inst *sdi);
 SR_PRIV int sols_convert_trigger(const struct sr_dev_inst *sdi);
