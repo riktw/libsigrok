@@ -257,13 +257,20 @@ static int config_list(uint32_t key, GVariant **data,
 		 * Channel groups are turned off if no channels in that group are
 		 * enabled, making more room for samples for the enabled group.
 		*/
+        sr_dbg("get mask");
 		sols_channel_mask(sdi);
 		num_sols_changrp = 0;
-		for (i = 0; i < 4; i++) {
-			if (devc->channel_mask & (0xff << (i * 8)))
-				num_sols_changrp++;
-		}
+        sr_dbg("list, n can be %i", devc->max_channels/32);
+        for (int n = 0; n < devc->max_channels/32; ++n)
+        {
+          for (i = 0; i < 4; i++) {
+              if (devc->channel_mask[n] & (0xff << (i * 8))) {
+                  num_sols_changrp++;
+              }
+          }
+        }
 
+        sr_dbg("max_samples %i, num_sols %i, limit_samples %i, readcount %i",devc->max_samples, num_sols_changrp, devc->limit_samples, MIN_NUM_SAMPLES );
 		*data = std_gvar_tuple_u64(MIN_NUM_SAMPLES,
 			(num_sols_changrp) ? devc->max_samples / num_sols_changrp : MIN_NUM_SAMPLES);
 		break;
@@ -333,7 +340,7 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	struct dev_context *devc;
 	struct sr_serial_dev_inst *serial;
 	uint32_t samplecount, readcount, delaycount;
-	uint8_t sols_changrp_mask;
+	uint8_t sols_changrp_mask[16];
 	int num_sols_changrp;
 	int ret, i;
 
@@ -348,13 +355,18 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	sols_channel_mask(sdi);
     
 	num_sols_changrp = 0;
-	sols_changrp_mask = 0;
-	for (i = 0; i < 4; i++) {
-		if (devc->channel_mask & (0xff << (i * 8))) {
-			sols_changrp_mask |= (1 << i);
-			num_sols_changrp++;
-		}
-	}
+	sr_dbg("start, n can be %i", devc->max_channels/32);
+    for (int n = 0; n < devc->max_channels/32; ++n)
+    {
+      sols_changrp_mask[n] = 0;
+      for (i = 0; i < 4; i++) {
+          if (devc->channel_mask[n] & (0xff << (i * 8))) {
+              sr_dbg("Channel mask n %i: %x",n, devc->channel_mask[n]);
+              sols_changrp_mask[n] |= (1 << i);
+              num_sols_changrp++;
+          }
+      }
+    }
 
 	/*
 	 * Limit readcount to prevent reading past the end of the hardware
@@ -362,7 +374,8 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	 */
 	samplecount = MIN(devc->max_samples / num_sols_changrp, devc->limit_samples);
 	readcount = (samplecount + 3) / 4;
-
+    sr_dbg("max_samples %i, num_sols %i, limit_samples %i, readcount %i",devc->max_samples, num_sols_changrp, devc->limit_samples, readcount );
+    
 	/* Basic triggers. */
 	if (sols_convert_trigger(sdi) != SR_OK) {
 		sr_err("Failed to configure channels.");
@@ -433,12 +446,19 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	 * Enable/disable sols channel groups in the flag register according
 	 * to the channel mask. 1 means "disable channel".
 	 */
-	devc->capture_flags |= ~(sols_changrp_mask << 2) & 0x3c;
+	devc->capture_flags |= ~(sols_changrp_mask[0] << 2) & 0x3c;
+    sr_dbg("sols_changrp_mask 0 is: %i", sols_changrp_mask[0]);
 
 	/* RLE mode is always zero, for now. */
 
 	arg[bytesToSend - 4] = devc->capture_flags & 0xff;
 	arg[bytesToSend - 3] = devc->capture_flags >> 8;
+    for (int n = 1; n < devc->max_channels/32; ++n)
+    {
+      sr_dbg("sols_changrp_mask %i is: %i", n, sols_changrp_mask[n]);
+      arg[bytesToSend - (4+(4*n))] = ~(sols_changrp_mask[n] << 2) & 0x3c;
+    }
+    
 
 	if (sols_send_longcommand(serial, CMD_SET_FLAGS, arg, bytesToSend) != SR_OK)
 		return SR_ERR;

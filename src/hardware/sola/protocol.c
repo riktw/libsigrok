@@ -72,12 +72,17 @@ SR_PRIV void sols_channel_mask(const struct sr_dev_inst *sdi)
 	const GSList *l;
 
 	devc = sdi->priv;
-
-	devc->channel_mask = 0;
+    
+    for(int i = 0; i < 16; ++i)
+    {
+      devc->channel_mask[i] = 0;
+    }
+    
 	for (l = sdi->channels; l; l = l->next) {
 		channel = l->data;
+        uint8_t triggerWord = channel->index / 32;
 		if (channel->enabled)
-			devc->channel_mask |= 1 << channel->index;
+			devc->channel_mask[triggerWord] |= 1 << (channel->index - (32 * triggerWord));
 	}
 }
 
@@ -309,6 +314,7 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 	int num_ols_changrp, offset, j;
 	unsigned int i;
 	unsigned char byte;
+    uint8_t sols_changrp_mask[16];
 
 	(void)fd;
 
@@ -317,6 +323,18 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 	devc = sdi->priv;
     uint32_t sample[devc->max_channels/32];
     bytesPerSample = (devc->max_channels / 8);
+    num_ols_changrp = 0;
+    for (int n = 0; n < devc->max_channels/32; ++n)
+    {
+      sols_changrp_mask[n] = 0;
+      for (i = 0; i < 4; i++) {
+          if (devc->channel_mask[n] & (0xff << (i * 8))) {
+              sols_changrp_mask[n] |= (1 << i);
+              num_ols_changrp++;
+          }
+      }
+    }
+    sr_dbg("num_ols_changrp: %i, bytesPerSample: %i", num_ols_changrp, bytesPerSample);
 
 	if (devc->num_transfers == 0 && revents == 0) {
 		/* Ignore timeouts as long as we haven't received anything */
@@ -333,15 +351,6 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 		memset(devc->raw_sample_buf, 0x82, devc->limit_samples * bytesPerSample);
 	}
 
-	num_ols_changrp = 0;
-	for (i = 0x20; i > 0x02; i >>= 1) {
-		if ((devc->capture_flags & i) == 0) {
-			num_ols_changrp++;
-		}
-	}
-	
-	//test
-	num_ols_changrp = 8;
 
 	if (revents == G_IO_IN && devc->num_samples < devc->limit_samples) {
 		if (serial_read_nonblocking(serial, &byte, 1) != 1)
@@ -403,18 +412,21 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 				 * the number of channels.
 				 */
 				j = 0;
-				memset(devc->tmp_sample, 0, 4);
-				for (i = 0; i < 4; i++) {
-					if (((devc->capture_flags >> 2) & (1 << i)) == 0) {
-						/*
-						 * This channel group was
-						 * enabled, copy from received
-						 * sample.
-						 */
-						devc->tmp_sample[i] = devc->sample[j++];
-					}
-				}
-				memcpy(devc->sample, devc->tmp_sample, 4);
+				memset(devc->tmp_sample, 0, bytesPerSample);
+                for (int n = 0; n < devc->max_channels/32; ++n) 
+                {
+                  for (i = 0; i < 4; i++) {
+                      if (devc->channel_mask[n] & (0xff << (i * 8))) {
+                          /*
+                          * This channel group was
+                          * enabled, copy from received
+                          * sample.
+                          */
+                          devc->tmp_sample[(n*4)+i] = devc->sample[j++];
+                      }
+                  }
+                }
+				memcpy(devc->sample, devc->tmp_sample, bytesPerSample);
 				//sr_spew("Expanded sample: 0x%.8x.", sample);
 			}
 
