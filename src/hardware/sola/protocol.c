@@ -334,7 +334,6 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
           }
       }
     }
-    sr_dbg("num_ols_changrp: %i, bytesPerSample: %i", num_ols_changrp, bytesPerSample);
 
 	if (devc->num_transfers == 0 && revents == 0) {
 		/* Ignore timeouts as long as we haven't received anything */
@@ -453,6 +452,7 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 		sr_dbg("Received %d bytes, %d samples, %d decompressed samples.",
 				devc->cnt_bytes, devc->cnt_samples,
 				devc->cnt_samples_rle);
+        
 		if (devc->trigger_at_smpl != OLS_NO_TRIGGER) {
 			/*
 			 * A trigger was set up, so we need to tell the frontend
@@ -473,6 +473,7 @@ SR_PRIV int sols_receive_data(int fd, int revents, void *cb_data)
 			std_session_send_df_trigger(sdi);
 		}
 
+        
 		/* Send post-trigger / all captured samples. */
 		int num_pre_trigger_samples = devc->trigger_at_smpl == OLS_NO_TRIGGER
 			? 0 : devc->trigger_at_smpl;
