@@ -319,6 +319,12 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/fluke-dmm/protocol.c \
 	src/hardware/fluke-dmm/api.c
 endif
+if HW_FLUPE_GOODLUCK
+src_libdrivers_la_SOURCES += \
+	src/hardware/flupe-goodluck/protocol.h \
+	src/hardware/flupe-goodluck/protocol.c \
+	src/hardware/flupe-goodluck/api.c
+endif
 if HW_FTDI_LA
 src_libdrivers_la_SOURCES += \
 	src/hardware/ftdi-la/protocol.h \
