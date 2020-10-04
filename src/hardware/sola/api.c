@@ -257,10 +257,8 @@ static int config_list(uint32_t key, GVariant **data,
 		 * Channel groups are turned off if no channels in that group are
 		 * enabled, making more room for samples for the enabled group.
 		*/
-        sr_dbg("get mask");
 		sols_channel_mask(sdi);
 		num_sols_changrp = 0;
-        sr_dbg("list, n can be %i", devc->max_channels/32);
         for (int n = 0; n < devc->max_channels/32; ++n)
         {
           for (i = 0; i < 4; i++) {
@@ -269,8 +267,6 @@ static int config_list(uint32_t key, GVariant **data,
               }
           }
         }
-
-        sr_dbg("max_samples %i, num_sols %i, limit_samples %i, readcount %i",devc->max_samples, num_sols_changrp, devc->limit_samples, MIN_NUM_SAMPLES );
 		*data = std_gvar_tuple_u64(MIN_NUM_SAMPLES,
 			(num_sols_changrp) ? devc->max_samples / num_sols_changrp : MIN_NUM_SAMPLES);
 		break;
@@ -312,6 +308,8 @@ static int set_basic_trigger(const struct sr_dev_inst *sdi, int stage)
 
 	cmd = CMD_SET_BASIC_TRIGGER_VALUE0 + stage * 4;
     
+    memset(arg, 0, bytesToSend);
+    
     for(n = 0; n < triggersToSend; ++n)
     {
       sr_dbg("n is %i, value is %x", (triggersToSend-1)-n, devc->trigger_value[(triggersToSend-1)-n]);
@@ -324,6 +322,8 @@ static int set_basic_trigger(const struct sr_dev_inst *sdi, int stage)
 		return SR_ERR;
 
 	cmd = CMD_SET_BASIC_TRIGGER_CONFIG0 + stage * 4;
+    
+    memset(arg, 0, bytesToSend);
 
 	arg[bytesToSend-2] = stage;
 	if (stage == devc->num_stages)
@@ -355,13 +355,11 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	sols_channel_mask(sdi);
     
 	num_sols_changrp = 0;
-	sr_dbg("start, n can be %i", devc->max_channels/32);
     for (int n = 0; n < devc->max_channels/32; ++n)
     {
       sols_changrp_mask[n] = 0;
       for (i = 0; i < 4; i++) {
           if (devc->channel_mask[n] & (0xff << (i * 8))) {
-              sr_dbg("Channel mask n %i: %x",n, devc->channel_mask[n]);
               sols_changrp_mask[n] |= (1 << i);
               num_sols_changrp++;
           }
@@ -374,8 +372,7 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	 */
 	samplecount = MIN(devc->max_samples / num_sols_changrp, devc->limit_samples);
 	readcount = (samplecount + 3) / 4;
-    sr_dbg("max_samples %i, num_sols %i, limit_samples %i, readcount %i",devc->max_samples, num_sols_changrp, devc->limit_samples, readcount );
-    
+
 	/* Basic triggers. */
 	if (sols_convert_trigger(sdi) != SR_OK) {
 		sr_err("Failed to configure channels.");
@@ -413,6 +410,7 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	if (sols_send_longcommand(serial, CMD_SET_DIVIDER, arg, bytesToSend) != SR_OK)
 		return SR_ERR;
 
+    memset(arg, 0, bytesToSend);
 	/* Send sample limit and pre/post-trigger capture ratio. */
 	sr_dbg("Setting sample limit %d, trigger point at %d",
 			(readcount - 1) * 4, (delaycount - 1) * 4);
@@ -439,6 +437,7 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 			return SR_ERR;
 	}
 
+	memset(arg, 0, bytesToSend);
 	/* Flag register. */
 	sr_dbg("Setting RLE %s",
 			devc->capture_flags & CAPTURE_FLAG_RLE ? "on" : "off");
@@ -447,7 +446,6 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	 * to the channel mask. 1 means "disable channel".
 	 */
 	devc->capture_flags |= ~(sols_changrp_mask[0] << 2) & 0x3c;
-    sr_dbg("sols_changrp_mask 0 is: %i", sols_changrp_mask[0]);
 
 	/* RLE mode is always zero, for now. */
 
@@ -455,7 +453,6 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	arg[bytesToSend - 3] = devc->capture_flags >> 8;
     for (int n = 1; n < devc->max_channels/32; ++n)
     {
-      sr_dbg("sols_changrp_mask %i is: %i", n, sols_changrp_mask[n]);
       arg[bytesToSend - (4+(4*n))] = ~(sols_changrp_mask[n] << 2) & 0x3c;
     }
     
@@ -471,7 +468,7 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	devc->rle_count = devc->num_transfers = 0;
 	devc->num_samples = devc->num_bytes = 0;
 	devc->cnt_bytes = devc->cnt_samples = devc->cnt_samples_rle = 0;
-	memset(devc->sample, 0, 4);
+	memset(devc->sample, 0, sizeof(devc->sample));
 
 	std_session_send_df_header(sdi);
 

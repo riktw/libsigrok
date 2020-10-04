@@ -89,8 +89,8 @@ struct dev_context {
 	uint64_t limit_samples;
 	uint64_t capture_ratio;
 	int trigger_at_smpl;
-	uint32_t channel_mask[16];
-	uint32_t trigger_mask[16];     //32 pits per mask, 16, max of 512 channels seems decent.
+	uint32_t channel_mask[16];     //32 pits per mask, 16, max of 512 channels seems decent.
+	uint32_t trigger_mask[16];     
 	uint32_t trigger_value[16];
 	int num_stages;
 	uint16_t capture_flags;
@@ -103,8 +103,8 @@ struct dev_context {
 	int cnt_samples_rle;
 
 	unsigned int rle_count;
-	unsigned char sample[16];
-	unsigned char tmp_sample[16];
+	unsigned char sample[64];    //8 bit per sample, 64 max for 512 channels. 
+	unsigned char tmp_sample[64];
 	unsigned char *raw_sample_buf;
 };
 

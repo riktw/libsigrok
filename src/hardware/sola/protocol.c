@@ -73,7 +73,7 @@ SR_PRIV void sols_channel_mask(const struct sr_dev_inst *sdi)
 
 	devc = sdi->priv;
     
-    for(int i = 0; i < 16; ++i)
+    for(int i = 0; i < (sizeof(devc->channel_mask) / sizeof(devc->channel_mask[0])); ++i)
     {
       devc->channel_mask[i] = 0;
     }
@@ -98,7 +98,7 @@ SR_PRIV int sols_convert_trigger(const struct sr_dev_inst *sdi)
 	devc = sdi->priv;
 
 	devc->num_stages = 0;
-	for (i = 0; i < 16; i++) {
+	for (i = 0; i < (sizeof(devc->trigger_mask) / sizeof(devc->trigger_mask[0])); i++) {
 		devc->trigger_mask[i] = 0;
 		devc->trigger_value[i] = 0;
 	}
